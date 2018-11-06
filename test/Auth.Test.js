@@ -7,17 +7,10 @@ const OceanAuth = artifacts.require('OceanAuth.sol')
 
 const ursa = require('ursa')
 const ethers = require('ethers')
+const BigNumber = require('bignumber.js')
 const Web3 = require('web3')
 
 const web3 = new Web3(new Web3.providers.HttpProvider('http://localhost:8545'))
-
-function wait(ms) {
-    const start = new Date().getTime()
-    let end = start
-    while (end < start + ms) {
-        end = new Date().getTime()
-    }
-}
 
 contract('OceanAuth', (accounts) => {
     describe('Test On-chain Authorization', () => {
@@ -27,21 +20,22 @@ contract('OceanAuth', (accounts) => {
             const token = await OceanToken.deployed()
             const market = await OceanMarket.deployed()
             const auth = await OceanAuth.deployed()
+            const scale = 10 ** 18
 
             const str = 'resource'
             const resourceId = await market.generateId(str, { from: accounts[0] })
-            const resourcePrice = 100
+            const resourcePrice = 100 * scale
             // 1. provider register dataset
-            await market.register(resourceId, resourcePrice, { from: accounts[0] })
+            await market.register(resourceId, new BigNumber(resourcePrice), { from: accounts[0] })
             console.log('publisher registers asset with id = ', resourceId)
 
             // consumer accounts[1] request initial funds to play
             console.log(accounts[1])
-            await market.requestTokens(1000, { from: accounts[1] })
+            await market.requestTokens(new BigNumber(1000 * scale), { from: accounts[1] })
             const bal = await token.balanceOf.call(accounts[1])
-            console.log(`consumer has balance := ${bal.valueOf()} now`)
+            console.log(`consumer has balance := ${bal.valueOf() / scale} now`)
             // consumer approve market to withdraw amount of token from his account
-            await token.approve(market.address, 200, { from: accounts[1] })
+            await token.approve(market.address, new BigNumber(200 * scale), { from: accounts[1] })
 
             // 2. consumer initiate an access request
             const modulusBit = 512
@@ -52,20 +46,12 @@ contract('OceanAuth', (accounts) => {
             const publicKey = publicPem.toPublicPem('utf8')
             console.log('public key is: = ', publicKey)
 
-            // listen to the event fired from initiateAccessRequest so that to get access Request Id
-            const requestAccessEvent = auth.AccessConsentRequested()
-            let accessId = 0x0
-            requestAccessEvent.watch((error, result) => {
-                if (!error) {
-                    accessId = result.args._id
-                }
-            })
+            const initiateAccessRequestTx = await auth.initiateAccessRequest(resourceId, accounts[0], publicKey, 9999999999, { from: accounts[1] })
 
-            // optional: delay 100 seconds so that requestAccessEvent can listen to the event fired by initiateAccessRequest
-            // it is designed for js integration testing; it is not needed in real practice.
-            wait(1000)
+            const accessId = initiateAccessRequestTx.logs.filter((log) => {
+                return log.event === 'AccessConsentRequested'
+            })[0].args._id
 
-            await auth.initiateAccessRequest(resourceId, accounts[0], publicKey, 9999999999, { from: accounts[1] })
             console.log('consumer creates an access request with id : ', accessId)
 
             // 3. provider commit the request
@@ -74,10 +60,10 @@ contract('OceanAuth', (accounts) => {
 
             // 4. consumer make payment
             const bal1 = await token.balanceOf.call(market.address)
-            console.log(`market has balance := ${bal1.valueOf()} before payment`)
-            await market.sendPayment(accessId, accounts[0], 100, 9999999999, { from: accounts[1] })
+            console.log(`market has balance := ${bal1.valueOf() / scale} before payment`)
+            await market.sendPayment(accessId, accounts[0], 100 * scale, 9999999999, { from: accounts[1] })
             const bal2 = await token.balanceOf.call(market.address)
-            console.log(`market has balance := ${bal2.valueOf()} after payment`)
+            console.log(`market has balance := ${bal2.valueOf() / scale} after payment`)
             console.log('consumer has paid the order')
 
             // 5. provider delivery the encrypted JWT token
@@ -103,13 +89,13 @@ contract('OceanAuth', (accounts) => {
             // const signature = web3.eth.sign(accounts[1], '0x' + Buffer.from(onChainencToken).toString('hex'))
             const prefix = '0x'
             const hexString = Buffer.from(onChainencToken).toString('hex')
-            const signature = web3.eth.sign(accounts[1], `${prefix}${hexString}`)
+            const signature = await web3.eth.sign(`${prefix}${hexString}`, accounts[1])
             console.log('consumer signature: ', signature)
 
             const sig = ethers.utils.splitSignature(signature)
 
             const fixedMsg = `\x19Ethereum Signed Message:\n${onChainencToken.length}${onChainencToken}`
-            const fixedMsgSha = web3.sha3(fixedMsg)
+            const fixedMsgSha = web3.utils.sha3(fixedMsg)
             console.log('signed message from consumer to be validated: ', fixedMsg)
 
             const res = await auth.verifySignature(accounts[1], fixedMsgSha, sig.v, sig.r, sig.s, { from: accounts[0] })
@@ -122,13 +108,10 @@ contract('OceanAuth', (accounts) => {
 
             // check balance
             const pbal = await token.balanceOf.call(accounts[0])
-            console.log(`provider has balance := ${pbal.valueOf()} now`)
+            console.log(`provider has balance := ${pbal.valueOf() / scale} now`)
 
             const mbal = await token.balanceOf.call(market.address)
-            console.log(`market has balance := ${mbal.valueOf()} now`)
-
-            // stop listening to event
-            requestAccessEvent.stopWatching()
+            console.log(`market has balance := ${mbal.valueOf() / scale} now`)
         })
     })
 })

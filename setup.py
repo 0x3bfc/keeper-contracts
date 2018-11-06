@@ -3,7 +3,7 @@
 
 """The setup script."""
 
-from setuptools import setup, find_packages
+from setuptools import setup
 import os
 from glob import glob
 
@@ -11,13 +11,19 @@ from glob import glob
 with open('README.md') as readme_file:
     readme = readme_file.read()
 
-os.system("cp -rf ./artifacts ./keeper-contracts")
-
 requirements = []
 
 setup_requirements = []
 
 test_requirements = []
+
+# Add the ABI Json artifacts
+data_files = []
+directories = glob('artifacts/*.json')
+for directory in directories:
+    files = glob(directory + '*')
+    print("Contract artifact found:", directory, files)
+    data_files.append((directory, files))
 
 setup(
     author="leucothia",
@@ -32,9 +38,7 @@ setup(
         'Programming Language :: Python :: 3.6',
     ],
     description=" 🐳 Integration of TCRs, CPM and Ocean Tokens in Solidity",
-    data_files=[
-        ('contracts', glob('artifacts/*.json')),
-    ],
+    data_files=data_files,
     install_requires=requirements,
     license="Apache Software License 2.0",
     long_description=readme,
@@ -45,8 +49,8 @@ setup(
     test_suite='tests',
     tests_require=test_requirements,
     url='https://github.com/oceanprotocol/keeper-contracts',
-    version='0.0.1.2',
+    version='0.3.13',
     zip_safe=False,
 )
 
-os.system("rm -rf ./keeper-contracts")
+os.system("rm -rf ./build")
